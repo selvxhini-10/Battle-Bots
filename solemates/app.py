@@ -196,8 +196,16 @@ def main(argv: list[str] | None = None) -> None:
         socks, pairs, singles, scores = app.analyze(image)
     except OptionalModelError as exc:
         raise SystemExit(f"Optional model setup error: {exc}") from exc
+    execution_error = None
+    status = "analyzed" if args.analyze_only else "completed"
     if not args.analyze_only:
-        app.execute(socks, pairs, singles)
+        try:
+            app.execute(socks, pairs, singles)
+        except Exception as exc:
+            status = "failed"
+            state = app.events[-1].state if app.events else RunState.MATCH
+            execution_error = {"type": type(exc).__name__, "message": str(exc)}
+            app.emit(state, "Execution failed", {"error": execution_error})
 
     args.output.mkdir(parents=True, exist_ok=True)
     annotated = annotate_scene(image, socks, pairs, singles)
@@ -207,6 +215,8 @@ def main(argv: list[str] | None = None) -> None:
         **metadata,
         "detector": detector,
         "matcher": matcher,
+        "status": status,
+        "error": execution_error,
         "sock_count": len(socks),
         "pairs": [asdict(pair) for pair in pairs],
         "singles": singles,
@@ -214,6 +224,8 @@ def main(argv: list[str] | None = None) -> None:
         "events": [event.json() for event in app.events],
     }
     (args.output / "run.json").write_text(json.dumps(report, indent=2))
+    if execution_error is not None:
+        raise SystemExit(f"Execution failed ({execution_error['type']}): {execution_error['message']}\n"f"Artifacts: {args.output.resolve()}")
     wrote_rrd = args.rrd and save_rerun(args.output / "run.rrd", image, annotated, socks)
 
     print(f"Detected {len(socks)} socks")
