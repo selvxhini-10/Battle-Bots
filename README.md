@@ -1,284 +1,182 @@
-# Solemates: Sock Matchmaker with Bracket Bot :) 
+# Solemates: Sock Matchmaker with BracketBot :)
 
-Solemates uses BracketBot's two arms to identify matching socks, pick up one sock with each arm, reunite the pair, and place unmatched socks in a **Singles Club** basket.
+Solemates finds matching socks in an overhead image, plans a two-arm reunion, validates every Cartesian motion against the supplied BracketBot URDF, and escorts unmatched socks to the **Singles Club**.
 
-## MVP
+## Run it
 
-Given five separated, flattened socks on a marked table:
+Python 3.10+, NumPy, and OpenCV are required.
 
-1. Detect every sock from an overhead camera.
-2. Match two pairs by color, pattern, size, and shape.
-3. Pick one sock from each pair with each arm.
-4. Bring the pair together and place it in the Couples area.
-5. Put the unmatched sock in the Singles Club.
-6. Verify every move and record the run in Rerun.
+```bash
+cd /Users/raiyaminhas/Projects/Battle-Bots
+python3 -m pip install -e .
+./run_demo.sh
+```
 
-Not in the MVP: tangled piles, folding, general-purpose grasping, or autonomous base navigation.
+The launcher opens the annotated result in the default macOS image viewer. Use `./run_demo.sh --headless` to generate artifacts without opening a window.
+Results are written to `demo_output/`:
 
-## System architecture
+- `scene.png`: synthetic camera frame
+- `matches.png`: detected socks, grasp points, pairs, confidence, and singleton
+- `run.json`: observations, all pair scores, accepted matches, IK solutions, and the full event trace
+
+Other modes:
+
+```bash
+python3 -m solemates --image path/to/table.jpg --analyze-only
+python3 -m solemates --camera 0 --analyze-only
+python3 -m pip install -e '.[viewer]'
+python3 -m solemates --synthetic --rrd
+python3 -m unittest discover -s tests -v
+```
+
+## Implemented pipeline
 
 ```text
-Overhead RGB camera
-        |
-        v
-OpenCV segmentation and feature extraction
-        |
-        v
-Pair scoring and global matching
-        |
-        v
-Grasp and task planner
-        |
-        v
-QP inverse kinematics
-        |
-        v
-Simulator or BracketBot hardware interface
-
-Camera frames, masks, matches, targets, joints, and outcomes -> Rerun
+Synthetic scene, image, or camera
+              |
+              v
+Background segmentation (OpenCV)
+              |
+              v
+Color + texture + size + shape features
+              |
+              v
+Globally optimal non-overlapping pairing
+              |
+              v
+Grasp and dual-arm task planning
+              |
+              v
+URDF FK + damped-least-squares position IK
+              |
+              v
+Safe simulated backend + JSON/Rerun logging
 ```
 
-## Stack
+The built-in scene contains two intended pairs and one singleton. The current test run detects all five, matches both pairs at roughly 93%, and IK-validates 33 arm movements.
 
-- Python 3.11+
-- Supplied `chopped_urdf_v2` URDF and meshes
-- NumPy: geometry and feature calculations
-- OpenCV: camera input, calibration, segmentation, contours, histograms, and PCA
-- SciPy: optional optimal pair assignment
-- Pink + Pinocchio: QP inverse kinematics, unless an organizer-provided IK stack is required
-- Rerun: 2D/3D visualization and `.rrd` recordings
-- YAML: calibration, workspace, motion, and threshold configuration
-- Organizer-provided motor API or ROS interface: physical execution
+## Matching
 
-Start with classical vision. Add learned image embeddings only if similar patterns cannot be distinguished reliably.
+The detector assumes separated socks on the configured plain background. Each connected component becomes a `SockObservation` with:
 
-## What the starter package provides
+- mask, bounding box, centroid, and area
+- principal orientation from PCA
+- interior grasp point from a distance transform
+- 2D HSV color histogram
+- Laplacian texture statistics
+- compactness, extent, and aspect-ratio shape features
 
-- Robot geometry and joint tree
-- Joint axes and limits
-- `root`, `arm_base`, `left_eef`, and `right_eef` frames
-- 18 movable joints, including mimic gripper joints
-- Standalone Rerun URDF viewer
-
-It does **not** provide sock perception, grasp planning, collision-free trajectories, motor control, or grasp feedback. Obtain the physical robot API and emergency-stop procedure from the organizers before hardware testing.
-
-## Workspace setup
-
-- Fix the robot and overhead camera in place.
-- Use a plain, high-contrast mat with marked Unsorted, Couples, and Singles regions.
-- Begin with four to six visually distinctive adult socks, separated and flattened.
-- Keep all motion inside a calibrated table rectangle.
-- Approach and lift vertically; travel above a conservative safe height.
-- Run at low speed with a person ready to stop the robot.
-
-## Perception
-
-### Calibration
-
-Use four or more known mat points to compute a pixel-to-table transform. If the camera is fixed and the table is planar, a homography is sufficient. Store the transform and table height in `config.yaml`.
-
-### Sock detection
-
-For each camera frame:
-
-1. Remove or threshold the known background.
-2. Clean the binary mask with morphological operations.
-3. Find connected components or contours.
-4. Reject regions outside configured area limits.
-5. Record each mask, centroid, outline, orientation, and confidence.
-
-If socks touch, the MVP may ask the user to separate them. Overlap separation is a stretch goal.
-
-### Features and matching
-
-For each sock, calculate:
-
-- HSV or Lab color histogram
-- Texture/pattern descriptor
-- Mask area and dimensions
-- Outline/shape descriptor
-- Principal orientation from PCA
-
-Example pair score:
+Pair confidence is:
 
 ```text
-score(i, j) = 0.45 * color_similarity
-            + 0.30 * pattern_similarity
-            + 0.15 * size_similarity
-            + 0.10 * shape_similarity
+0.50 * color + 0.25 * pattern + 0.15 * size + 0.10 * shape
 ```
 
-Choose a globally consistent set of non-overlapping pairs. Accept a pair only above `match_threshold`; send remaining socks to Singles. Tune weights and the threshold on labeled test images rather than during the final demo.
+Dynamic programming chooses the maximum-total-score set of non-overlapping pairs. Candidates below `match_threshold` remain single. We do not greedily accept the first good-looking match.
 
-## Grasp planning
+Tune the background and matching settings in `config.json` for the real table and socks.
 
-For each sock mask:
+## Coordinates and grasping
 
-1. Estimate its long axis and unobstructed regions.
-2. Prefer the cuff or a thick region away from mask boundaries.
-3. Convert the selected pixel to table coordinates.
-4. Orient the gripper across the local fabric direction.
-5. Generate pre-grasp, grasp, lift, transport, place, and retreat poses.
+The MVP linearly maps the camera image rectangle onto `table_bounds_m`. This is correct for the synthetic scene but only an approximation for a real camera. Before physical execution, replace it with a calibrated planar homography from at least four known table points.
 
-Represent a target as:
-
-```python
-GraspTarget(
-    position=(x, y, z),
-    yaw=yaw,
-    approach_height=0.12,
-    gripper_width=0.025,
-)
-```
-
-If bare fabric is unreliable, place a removable felt tab inside each cuff and document it as an engineered grasp affordance.
-
-## Motion sequence
+For each sock, the planner creates:
 
 ```text
-move above target -> orient -> descend -> close -> pause -> lift vertically
--> travel above destination -> descend -> open -> retreat
+pregrasp -> grasp -> close -> vertical lift -> transport -> place -> open -> retreat
 ```
 
-Develop with one arm first. The final reunion sequence is:
+The gripper is oriented across the sock's principal fabric direction. If bare cloth is unreliable, a removable felt tab inside each cuff is a reasonable, documented grasp affordance.
 
-1. Right arm picks sock A.
-2. Left arm picks sock B.
-3. Both lift to safe height.
-4. Both move to a central presentation pose.
-5. Pause, then place the socks side by side.
-6. Retreat and perform a small, prevalidated happy wiggle.
+## Kinematics
 
-QP IK converts `left_eef` or `right_eef` targets into joint updates while enforcing URDF joint limits. Treat mimic gripper joints as dependent values. Validate every generated pose in Rerun before enabling physical execution.
+`solemates/kinematics.py` parses the supplied URDF directly. It supports fixed, revolute, continuous, and prismatic joints; calculates forward kinematics from `arm_base` to either end effector; and solves position targets with numerical damped-least-squares IK while clamping every joint to its URDF limits.
+
+The solver covers seven independent joints per arm (`j0` through `j6`). Gripper mimic joints are not independent IK variables.
+
+This lightweight solver is suitable for reachability checks and hackathon simulation. Physical control should use the organizers' supported controller and, if appropriate, constrained QP IK with velocity, collision, and hardware limits.
 
 ## State machine
 
 ```text
 SCAN -> MATCH -> PICK_FIRST -> PICK_SECOND -> REUNITE -> PLACE_PAIR
-  ^                                                        |
-  |                                                        v
-RECOVER <------------------------ VERIFY <-----------------+
+                                                           |
+                                                           v
+                                                        VERIFY
 
-Remaining low-confidence sock -> HANDLE_SINGLE -> VERIFY
-No remaining socks -> CELEBRATE -> DONE
+remaining singleton -> HANDLE_SINGLE -> VERIFY
+no remaining socks  -> CELEBRATE -> DONE
 ```
 
-After every action, rescan the table. A placement succeeds only if the sock disappears from its source region and appears near its destination. On failure: open, retreat, rescan, select a new grasp point, and retry. Stop and request human help after two failed attempts.
+The simulated backend validates workspace bounds, solves IK for every move, tracks which sock each arm holds, and rejects impossible release/attachment sequences. Its verification events are task-state checks, not visual confirmation of cloth motion. The current launcher shows the perception result; it does not animate the 3D robot or simulate cloth physics.
 
-## Software layout
+Real closed-loop verification still needs to rescan after each pickup and placement and confirm that the sock moved from the source region to the destination. Retry with a new grasp point, then request human help after `max_retries`.
+
+## Project structure
 
 ```text
+config.json                 thresholds, workspace, destinations, backend
+run_demo.sh                 synthetic demo launcher
 solemates/
-├── app.py
-├── config.yaml
-├── perception/
-│   ├── camera.py
-│   ├── calibration.py
-│   ├── segmentation.py
-│   └── features.py
-├── matching/
-│   └── pair_socks.py
-├── manipulation/
-│   ├── grasp_planner.py
-│   ├── task_planner.py
-│   ├── ik.py
-│   └── motions.py
-├── robot/
-│   ├── interface.py
-│   ├── simulated_robot.py
-│   └── bracketbot_robot.py
-├── visualization/
-│   └── rerun_logger.py
-└── tests/
-    └── images/
+  app.py                    CLI and state-machine orchestration
+  kinematics.py             URDF parser, FK, and numerical IK
+  matching.py               scoring and global assignment
+  models.py                 typed observations, poses, plans, events
+  perception.py             segmentation and feature extraction
+  planning.py               pixel mapping and grasp/destination poses
+  robot.py                  simulated backend and guarded hardware adapter
+  synthetic.py              deterministic five-sock scene
+  visualization.py          annotated PNG and optional Rerun output
+tests/
+  test_kinematics.py
+  test_matching.py
+  test_pipeline.py
+chopped_urdf_v2/            supplied self-contained robot model/viewer
 ```
 
-Both robot backends should implement:
+## Hardware boundary
+
+`BracketBotRobot` intentionally raises an error. A URDF describes the robot but cannot command motors. Before removing that guard, obtain and implement:
+
+- supported joint or end-effector command API
+- live joint feedback and units
+- gripper commands and grasp feedback
+- controller rate and trajectory format
+- velocity/acceleration limits
+- collision and workspace constraints
+- watchdog, fault handling, and emergency stop
+
+The hardware adapter must preserve this task-level interface:
 
 ```python
-robot.move_end_effector(arm, target_pose)
+robot.move_end_effector(arm, pose)
 robot.set_gripper(arm, closed)
-robot.get_joint_positions()
 robot.stop()
 ```
 
-This keeps perception and planning identical in simulation and on hardware.
+Running `--backend hardware` currently fails safely and explains what is missing.
 
-## Configuration
+## MVP and limits
 
-```yaml
-camera:
-  device: 0
-  homography: []
+MVP success is sorting five separated, flattened socks—two pairs plus one singleton—three times consecutively without unsafe motion or human intervention.
 
-workspace:
-  table_z: 0.0
-  safe_height: 0.12
-  bounds: [xmin, xmax, ymin, ymax]
-  couples_pose: [x, y, z, yaw]
-  singles_pose: [x, y, z, yaw]
+Not yet implemented:
 
-matching:
-  weights: {color: 0.45, pattern: 0.30, size: 0.15, shape: 0.10}
-  match_threshold: 0.75
+- physics/contact or cloth deformation
+- automatic camera homography calibration
+- touching, overlapping, or tangled sock separation
+- collision-aware trajectory planning
+- visual post-action verification and retry
+- physical motor control
+- learned pattern embeddings
 
-execution:
-  backend: simulated
-  speed_scale: 0.15
-  max_retries: 2
-```
-
-Never store unexplained joint-angle arrays in application logic. Name reusable poses and document their coordinate frame.
-
-## Rerun logging
-
-Log at minimum:
-
-- Raw and annotated camera frames
-- Segmentation masks and sock IDs
-- Pair scores and accepted matches
-- Pixel and world-coordinate grasp points
-- End-effector targets and planned paths
-- Actual joint positions, when available
-- State-machine transitions, retries, and outcomes
-
-Save a complete `.rrd` recording for debugging and the project demo.
-
-## Build order
-
-1. **Scripted simulation:** hard-code two sock locations and animate pickup, reunion, placement, and celebration in the URDF viewer.
-2. **Vision only:** correctly match four distinctive pairs across at least ten test layouts.
-3. **Calibration:** clicking a camera pixel moves the simulated end effector above the corresponding table point.
-4. **One-arm manipulation:** reliably pick and place one flattened sock.
-5. **Closed loop:** detect, match, pick, place, rescan, and recover.
-6. **Dual-arm demo:** add simultaneous presentation, Singles Club, and happy wiggle.
-
-Keep independently demonstrable fallbacks: real vision with simulated manipulation, and manual coordinates with real manipulation.
-
-## Tests and success criteria
-
-- Unit-test similarity scores using labeled matching and non-matching pairs.
-- Test calibration error across the entire workspace, not only at its center.
-- Test IK reachability and joint limits for every named destination.
-- Test empty scenes, odd sock counts, low-confidence matches, failed grasps, and camera loss.
-- Run physical motions first without socks, then with one sock, then with both arms.
-- MVP success: correctly sort five separated socks in three consecutive runs without unsafe motion or manual intervention.
-
-## Stretch goals
-
-- Similar-pattern matching with learned embeddings
-- Touching or partially overlapping socks
-- Depth-aware grasp selection
-- Grasp-success sensing
-- Mild untangling
-- Folding matched pairs
-- Active human clarification for uncertain matches
-- Mobile-base collection from multiple stations
+Good stretch goals are visual verification, uncertain-match human confirmation, depth-aware grasps, learned embeddings, overlapping socks, and folding matched pairs.
 
 ## Safety
 
-- Confirm the emergency stop before every hardware session.
-- Enforce joint, velocity, workspace, and table-height limits in software.
+- Confirm the physical emergency stop before every hardware session.
+- Start without socks, then use one sock and one arm.
+- Use low velocity and a conservative vertical travel height.
 - Keep people outside the arm workspace while motion is enabled.
-- Never execute unvisualized poses or unbounded IK output.
-- Stop on lost camera input, stale joint feedback, IK failure, or unexpected contact.
+- Stop on camera loss, stale joint feedback, IK failure, unexpected contact, or workspace violation.
+- Never send unvisualized or unbounded IK output to hardware.
