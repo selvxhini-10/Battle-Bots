@@ -33,6 +33,7 @@ class SockObservation:
     pattern: np.ndarray = field(repr=False)
     shape: np.ndarray = field(repr=False)
     grasp_px: tuple[float, float]
+    embedding: np.ndarray | None = field(default=None, repr=False)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -42,6 +43,7 @@ class SockObservation:
             "angle_rad": self.angle_rad,
             "area_px": self.area_px,
             "bbox_px": list(self.bbox_px),
+            "has_embedding": self.embedding is not None,
         }
 
 
@@ -81,4 +83,3 @@ class Event:
         value = asdict(self)
         value["state"] = self.state.value
         return value
-

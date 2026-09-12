@@ -76,6 +76,40 @@ Dynamic programming chooses the maximum-total-score set of non-overlapping pairs
 
 Tune the background and matching settings in `config.json` for the real table and socks.
 
+## Optional zero-shot fallbacks
+
+No training is required. The default remains classical OpenCV because it is fast, deterministic, and sufficient for isolated socks on a high-contrast mat.
+
+Use SAM when thresholding cannot separate a sock from the mat:
+
+```bash
+python3 -m pip install -e '.[sam]'
+python3 scripts/download_sam.py
+python3 -m solemates --image table.jpg --detector sam --sam-checkpoint models/sam_vit_b_01ec64.pth --analyze-only
+```
+
+This uses Meta's `SamAutomaticMaskGenerator` with grid prompts. The adapter rejects huge/background masks, border masks, small masks, and high-IoU duplicates before passing the results through the same feature pipeline. The ViT-B checkpoint is about 375 MiB and is ignored by Git.
+
+Use CLIP when classical features confuse similar patterns:
+
+```bash
+python3 -m pip install -e '.[clip]'
+python3 -m solemates --image table.jpg --matcher clip --analyze-only
+```
+
+CLIP embeds each masked sock crop with `ViT-B/32`; normalized cosine similarity receives 50% of the configured hybrid score. `clip.load()` downloads the pretrained weights on first use. Both integrations load lazily, so neither PyTorch nor a checkpoint is required for the normal demo.
+
+Available combinations:
+
+```text
+--detector threshold --matcher classical   # default, fastest
+--detector sam       --matcher classical   # difficult background
+--detector threshold --matcher clip        # difficult patterns
+--detector sam       --matcher clip        # heaviest fallback
+```
+
+Use `--device cpu`, `--device cuda`, or `--device mps` to override model execution. `auto` conservatively selects CUDA when available and otherwise uses CPU.
+
 ## Coordinates and grasping
 
 The MVP linearly maps the camera image rectangle onto `table_bounds_m`. This is correct for the synthetic scene but only an approximation for a real camera. Before physical execution, replace it with a calibrated planar homography from at least four known table points.
@@ -125,12 +159,15 @@ solemates/
   perception.py             segmentation and feature extraction
   planning.py               pixel mapping and grasp/destination poses
   robot.py                  simulated backend and guarded hardware adapter
+  smart.py                  optional SAM masks and CLIP embeddings
   synthetic.py              deterministic five-sock scene
   visualization.py          annotated PNG and optional Rerun output
 tests/
   test_kinematics.py
   test_matching.py
   test_pipeline.py
+  test_smart.py
+scripts/download_sam.py     official SAM ViT-B checkpoint downloader
 chopped_urdf_v2/            supplied self-contained robot model/viewer
 ```
 
@@ -168,9 +205,8 @@ Not yet implemented:
 - collision-aware trajectory planning
 - visual post-action verification and retry
 - physical motor control
-- learned pattern embeddings
 
-Good stretch goals are visual verification, uncertain-match human confirmation, depth-aware grasps, learned embeddings, overlapping socks, and folding matched pairs.
+Good stretch goals are visual verification, uncertain-match human confirmation, depth-aware grasps, overlapping socks, and folding matched pairs.
 
 ## Safety
 

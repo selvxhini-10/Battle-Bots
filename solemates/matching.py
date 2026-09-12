@@ -19,7 +19,13 @@ def score_pair(a: SockObservation, b: SockObservation, weights: dict) -> PairMat
     size = min(a.area_px, b.area_px) / max(a.area_px, b.area_px)
     shape = float(np.exp(-3.0 * np.linalg.norm(a.shape - b.shape)))
     parts = {"color": color, "pattern": pattern, "size": size, "shape": shape}
-    total = sum(float(weights[name]) * value for name, value in parts.items())
+    if a.embedding is not None and b.embedding is not None:
+        parts["clip"] = float(np.clip(_cosine(a.embedding, b.embedding), 0.0, 1.0))
+    active = {name: float(weight) for name, weight in weights.items() if name in parts and weight > 0}
+    weight_sum = sum(active.values())
+    if weight_sum <= 0:
+        raise ValueError("At least one available matching weight must be positive")
+    total = sum(weight * parts[name] for name, weight in active.items()) / weight_sum
     return PairMatch(a.id, b.id, float(total), parts)
 
 
@@ -61,4 +67,3 @@ def find_pairs(
     matched = {sock_id for pair in chosen_keys for sock_id in pair}
     singles = [sock.id for sock in socks if sock.id not in matched]
     return chosen, singles, sorted(all_scores, key=lambda pair: pair.score, reverse=True)
-

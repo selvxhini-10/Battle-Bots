@@ -25,10 +25,32 @@ def segment_socks(image: np.ndarray, cfg: dict) -> list[SockObservation]:
             components.append((label, labels == label, stats[label], centroids[label]))
     components.sort(key=lambda item: (item[3][1], item[3][0]))
 
-    return [
-        _describe_sock(index + 1, image, mask, stat, centroid)
-        for index, (_label, mask, stat, centroid) in enumerate(components)
-    ]
+    return observations_from_masks(image, [item[1] for item in components])
+
+
+def observations_from_masks(
+    image: np.ndarray, masks: list[np.ndarray]
+) -> list[SockObservation]:
+    """Build the same features from threshold, SAM, or another mask source."""
+    masks = sorted(masks, key=lambda mask: _mask_centroid(mask)[::-1])
+    described = []
+    for index, mask in enumerate(masks, 1):
+        mask_bool = np.asarray(mask, dtype=bool)
+        ys, xs = np.nonzero(mask_bool)
+        if len(xs) == 0:
+            continue
+        stat = np.array([
+            xs.min(), ys.min(), xs.max() - xs.min() + 1,
+            ys.max() - ys.min() + 1, len(xs),
+        ])
+        centroid = np.array([xs.mean(), ys.mean()])
+        described.append(_describe_sock(index, image, mask_bool, stat, centroid))
+    return described
+
+
+def _mask_centroid(mask: np.ndarray) -> tuple[float, float]:
+    ys, xs = np.nonzero(mask)
+    return (float(xs.mean()), float(ys.mean())) if len(xs) else (0.0, 0.0)
 
 
 def _describe_sock(
@@ -82,4 +104,3 @@ def _describe_sock(
         shape=shape,
         grasp_px=(float(gx), float(gy)),
     )
-

@@ -10,6 +10,17 @@ dependencies = [
 
 [project.optional-dependencies]
 viewer = ["rerun-sdk>=0.26"]
+sam = [
+    "torch>=1.7",
+    "torchvision>=0.8",
+    "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
+]
+clip = [
+    "torch>=1.7",
+    "torchvision>=0.8",
+    "Pillow>=9",
+    "openai-clip @ git+https://github.com/openai/CLIP.git",
+]
 dev = ["pytest>=8"]
 
 [project.scripts]
@@ -19,7 +30,9 @@ solemates = "solemates.app:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+packages = ["solemates"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

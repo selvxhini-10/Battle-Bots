@@ -1,13 +1,30 @@
 {
   "perception": {
+    "method": "threshold",
     "background_bgr": [242, 242, 242],
     "background_distance": 30.0,
     "minimum_area_px": 1800,
-    "morphology_kernel": 5
+    "morphology_kernel": 5,
+    "sam": {
+      "checkpoint": "models/sam_vit_b_01ec64.pth",
+      "model_type": "vit_b",
+      "device": "auto",
+      "points_per_side": 24,
+      "pred_iou_threshold": 0.86,
+      "stability_threshold": 0.90,
+      "box_nms_threshold": 0.70,
+      "mask_iou_threshold": 0.72,
+      "minimum_area_px": 1800,
+      "maximum_area_fraction": 0.30,
+      "reject_border_masks": true
+    }
   },
   "matching": {
+    "method": "classical",
     "weights": {"color": 0.5, "pattern": 0.25, "size": 0.15, "shape": 0.1},
-    "match_threshold": 0.72
+    "clip_weights": {"color": 0.25, "pattern": 0.10, "size": 0.10, "shape": 0.05, "clip": 0.50},
+    "match_threshold": 0.72,
+    "clip": {"model": "ViT-B/32", "device": "auto", "crop_padding_px": 12}
   },
   "workspace": {
     "image_size": [960, 640],

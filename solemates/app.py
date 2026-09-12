@@ -12,13 +12,16 @@ from .models import Event, Pose, RunState, SockObservation
 from .perception import segment_socks
 from .planning import PixelTableTransform, destination_pose, make_grasp_plan
 from .robot import BracketBotRobot, SimulatedRobot
+from .smart import OptionalModelError, attach_clip_embeddings, segment_with_sam
 from .synthetic import make_scene
 from .visualization import annotate_scene, save_rerun
 
 
 class SolematesApp:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, detector: str = "threshold", matcher: str = "classical"):
         self.config = config
+        self.detector = detector
+        self.matcher = matcher
         self.events: list[Event] = []
         self.step = 0
         execution = config["execution"]
@@ -35,11 +38,18 @@ class SolematesApp:
 
     def analyze(self, image) -> tuple[list[SockObservation], list, list[int], list]:
         self.emit(RunState.SCAN, "Scanning table")
-        socks = segment_socks(image, self.config["perception"])
+        perception = self.config["perception"]
+        if self.detector == "sam":
+            socks = segment_with_sam(image, perception["sam"])
+        else:
+            socks = segment_socks(image, perception)
+        if self.matcher == "clip":
+            attach_clip_embeddings(image, socks, self.config["matching"]["clip"])
         self.emit(RunState.SCAN, f"Detected {len(socks)} socks", {"socks": [sock.summary() for sock in socks]})
         self.emit(RunState.MATCH, "Scoring possible couples")
         matching = self.config["matching"]
-        pairs, singles, scores = find_pairs(socks, matching["weights"], matching["match_threshold"])
+        weights = matching["clip_weights"] if self.matcher == "clip" else matching["weights"]
+        pairs, singles, scores = find_pairs(socks, weights, matching["match_threshold"])
         self.emit(
             RunState.MATCH,
             f"Accepted {len(pairs)} pairs and {len(singles)} singles",
@@ -143,6 +153,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=default_config)
     parser.add_argument("--output", type=Path, default=Path("demo_output"))
     parser.add_argument("--backend", choices=("simulated", "hardware"), help="override configured backend")
+    parser.add_argument("--detector", choices=("threshold", "sam"), help="sock mask source")
+    parser.add_argument("--matcher", choices=("classical", "clip"), help="pair feature stack")
+    parser.add_argument("--sam-checkpoint", type=Path, help="override SAM checkpoint path")
+    parser.add_argument("--device", help="model device: auto, cpu, cuda, or mps")
     parser.add_argument("--analyze-only", action="store_true", help="skip simulated robot execution")
     parser.add_argument("--rrd", action="store_true", help="also write a Rerun recording when installed")
     return parser
@@ -153,14 +167,27 @@ def main(argv: list[str] | None = None) -> None:
     if not (args.synthetic or args.image or args.camera is not None):
         args.synthetic = True
     config = json.loads(args.config.read_text())
+    configured_checkpoint = Path(config["perception"]["sam"]["checkpoint"])
+    if not configured_checkpoint.is_absolute():
+        config["perception"]["sam"]["checkpoint"] = str(args.config.parent / configured_checkpoint)
     if args.backend:
         config["execution"]["backend"] = args.backend
+    detector = args.detector or config["perception"].get("method", "threshold")
+    matcher = args.matcher or config["matching"].get("method", "classical")
+    if args.sam_checkpoint:
+        config["perception"]["sam"]["checkpoint"] = str(args.sam_checkpoint)
+    if args.device:
+        config["perception"]["sam"]["device"] = args.device
+        config["matching"]["clip"]["device"] = args.device
     image, metadata = _load_image(args, config)
     actual_size = [image.shape[1], image.shape[0]]
     config["workspace"]["image_size"] = actual_size
 
-    app = SolematesApp(config)
-    socks, pairs, singles, scores = app.analyze(image)
+    app = SolematesApp(config, detector=detector, matcher=matcher)
+    try:
+        socks, pairs, singles, scores = app.analyze(image)
+    except OptionalModelError as exc:
+        raise SystemExit(f"Optional model setup error: {exc}") from exc
     if not args.analyze_only:
         app.execute(socks, pairs, singles)
 
@@ -170,6 +197,8 @@ def main(argv: list[str] | None = None) -> None:
     cv2.imwrite(str(args.output / "matches.png"), annotated)
     report = {
         **metadata,
+        "detector": detector,
+        "matcher": matcher,
         "sock_count": len(socks),
         "pairs": [asdict(pair) for pair in pairs],
         "singles": singles,
