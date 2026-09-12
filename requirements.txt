@@ -1,0 +1,10 @@
+# Core dependencies
+numpy>=1.24
+opencv-python>=4.8
+
+# Optional: Rerun visualization and .rrd recording
+# pip install -e ".[viewer]" instead, or:
+# rerun-sdk>=0.26
+
+# Development / testing
+pytest>=8
