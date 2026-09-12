@@ -112,7 +112,16 @@ Use `--device cpu`, `--device cuda`, or `--device mps` to override model executi
 
 ## Coordinates and grasping
 
-The MVP linearly maps the camera image rectangle onto `table_bounds_m`. This is correct for the synthetic scene but only an approximation for a real camera. Before physical execution, replace it with a calibrated planar homography from at least four known table points.
+Real images use `camera.homography` when present in the selected config. Without it, the planner linearly maps the image rectangle onto `table_bounds_m`. Synthetic CLI runs always use that linear mapping, ignoring real-camera calibration.
+
+To calibrate:
+
+1. Set `REAL_POINTS` in `calibrate.py` to four measured marker coordinates in meters in the robot's `arm_base` frame. Use distinct markers with no three collinear.
+2. Keep the camera fixed and run `python calibrate.py --camera 0` (or `--image table.jpg` / `--url STREAM_URL`). Click the corresponding markers in the same order.
+3. The script saves `camera.homography` and `camera.image_size` to the project `config.json`. Use `--config PATH` on both scripts if using another config.
+4. Check additional measured points: the fitting error at the original four markers does not measure independent accuracy. Recalibrate if the camera moves, the view is cropped, or zoom changes.
+
+The planner applies the perspective transform to grasp positions and its local derivative to sock directions. Invalid matrices and mismatched calibration resolutions are rejected during execution. Older matrices without `camera.image_size` remain supported, but cannot detect resolution mismatches. Homography assumes socks lie on the calibrated table plane; it does not estimate height or correct lens distortion. Planned yaw is still not enforced by the position-only simulated IK solver.
 
 For each sock, the planner creates:
 

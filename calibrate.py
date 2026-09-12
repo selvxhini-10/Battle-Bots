@@ -81,7 +81,16 @@ def grab_frame(args) -> np.ndarray:
 def compute_homography(pixel_pts, real_pts):
     src = np.float32(pixel_pts)
     dst = np.float32(real_pts)
+    for points in (src, dst):
+        if points.shape != (4, 2) or not np.isfinite(points).all():
+            raise ValueError("Calibration requires four finite pixel and table point pairs")
+        for omitted in range(4):
+            triangle = np.delete(points, omitted, axis=0)
+            if np.linalg.matrix_rank(triangle[1:] - triangle[0]) < 2:
+                raise ValueError("Invalid calibration: markers must be distinct with no three collinear")
     H, mask = cv2.findHomography(src, dst)
+    if H is None or not np.isfinite(H).all() or np.linalg.matrix_rank(H) != 3:
+        raise ValueError("Invalid calibration: click four distinct, non-collinear markers")
     inliers = int(mask.sum()) if mask is not None else 4
     return H, inliers
 
@@ -96,11 +105,15 @@ def validate_homography(H, pixel_pts, real_pts):
     return float(errors.mean())
 
 
-def save_to_config(H, config_path: Path):
+def save_to_config(H, config_path: Path, image_size=None):
     config = {}
     if config_path.exists():
         config = json.loads(config_path.read_text())
     config.setdefault("camera", {})["homography"] = H.tolist()
+    if image_size is not None:
+        config["camera"]["image_size"] = list(image_size)
+    else:
+        config["camera"].pop("image_size", None)
     config_path.write_text(json.dumps(config, indent=2))
     print(f"\nHomography saved to {config_path}")
 
@@ -113,7 +126,7 @@ def main():
     src.add_argument("--camera", default="0", help="webcam index (default: 0)")
     src.add_argument("--url", help="IP camera stream URL, e.g. http://192.168.1.5:8080/video")
     src.add_argument("--image", type=Path, help="static image file")
-    parser.add_argument("--config", type=Path, default=Path("config.json"))
+    parser.add_argument("--config", type=Path, default=Path(__file__).parent / "config.json")
     parser.add_argument("--output-image", type=Path, default=Path("demo_output/calibration.png"))
     args = parser.parse_args()
 
@@ -147,18 +160,20 @@ def main():
             break
         if len(clicked_points) == 4:
             print("\nAll 4 points collected. Computing homography...")
-            H, inliers = compute_homography(clicked_points, REAL_POINTS)
+            try:
+                H, inliers = compute_homography(clicked_points, REAL_POINTS)
+            except ValueError as exc:
+                print(f"{exc}. Please click the four markers again.")
+                clicked_points = []
+                display_image = overlay.copy()
+                continue
             print(f"Homography computed ({inliers}/4 inliers):\n{H}\n")
             mean_err = validate_homography(H, clicked_points, REAL_POINTS)
-            print(f"\nMean reprojection error: {mean_err:.1f} mm", end="  ")
-            if mean_err < 5:
-                print("✓ excellent")
-            elif mean_err < 15:
-                print("✓ acceptable")
-            else:
-                print("⚠ high — check marker positions or re-click")
+            print(f"\nMean fitting error: {mean_err:.1f} mm")
+            print("These four points were used to fit the matrix; this is not an independent accuracy check.")
+            print("Check additional measured table points before using the calibration for robot motion.")
 
-            save_to_config(H, args.config)
+            save_to_config(H, args.config, (w, h))
 
             # Save annotated image
             args.output_image.parent.mkdir(parents=True, exist_ok=True)

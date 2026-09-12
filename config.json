@@ -1,7 +1,11 @@
 {
   "perception": {
     "method": "threshold",
-    "background_bgr": [242, 242, 242],
+    "background_bgr": [
+      242,
+      242,
+      242
+    ],
     "background_distance": 30.0,
     "minimum_area_px": 1800,
     "morphology_kernel": 5,
@@ -11,33 +15,91 @@
       "device": "auto",
       "points_per_side": 24,
       "pred_iou_threshold": 0.86,
-      "stability_threshold": 0.90,
-      "box_nms_threshold": 0.70,
+      "stability_threshold": 0.9,
+      "box_nms_threshold": 0.7,
       "mask_iou_threshold": 0.72,
       "minimum_area_px": 1800,
-      "maximum_area_fraction": 0.30,
+      "maximum_area_fraction": 0.3,
       "reject_border_masks": true
     }
   },
   "matching": {
     "method": "classical",
-    "weights": {"color": 0.5, "pattern": 0.25, "size": 0.15, "shape": 0.1},
-    "clip_weights": {"color": 0.25, "pattern": 0.10, "size": 0.10, "shape": 0.05, "clip": 0.50},
+    "weights": {
+      "color": 0.5,
+      "pattern": 0.25,
+      "size": 0.15,
+      "shape": 0.1
+    },
+    "clip_weights": {
+      "color": 0.25,
+      "pattern": 0.1,
+      "size": 0.1,
+      "shape": 0.05,
+      "clip": 0.5
+    },
     "match_threshold": 0.72,
-    "clip": {"model": "ViT-B/32", "device": "auto", "crop_padding_px": 12}
+    "clip": {
+      "model": "ViT-B/32",
+      "device": "auto",
+      "crop_padding_px": 12
+    }
   },
   "workspace": {
-    "image_size": [960, 640],
-    "table_bounds_m": [-0.35, 0.35, -0.30, 0.30],
+    "image_size": [
+      960,
+      640
+    ],
+    "table_bounds_m": [
+      -0.35,
+      0.35,
+      -0.3,
+      0.3
+    ],
     "table_z_m": 0.0,
     "safe_height_m": 0.16,
     "grasp_height_m": 0.012,
-    "couples_origins_m": [[0.06, -0.22], [0.20, -0.22]],
-    "singles_origin_m": [-0.25, -0.22]
+    "couples_origins_m": [
+      [
+        0.06,
+        -0.22
+      ],
+      [
+        0.2,
+        -0.22
+      ]
+    ],
+    "singles_origin_m": [
+      -0.25,
+      -0.22
+    ]
   },
   "execution": {
     "backend": "simulated",
     "speed_scale": 0.15,
     "max_retries": 2
+  },
+  "camera": {
+    "homography": [
+      [
+        -0.0008446539645758597,
+        -1.0995613809815036e-06,
+        0.6814898027647505
+      ],
+      [
+        -5.657225440426001e-06,
+        -0.0011836673633750438,
+        0.9665379957946807
+      ],
+      [
+        -6.131222672256112e-05,
+        0.00044469186012631147,
+        1.0
+      ]
+    ],
+    "image_size": [
+      1920,
+      1080
+    ]
   }
 }
