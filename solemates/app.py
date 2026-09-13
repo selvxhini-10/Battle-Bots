@@ -59,7 +59,12 @@ class SolematesApp:
 
     def execute(self, socks: list[SockObservation], pairs, singles: list[int]) -> None:
         workspace = self.config["workspace"]
-        transform = PixelTableTransform(tuple(workspace["image_size"]), tuple(workspace["table_bounds_m"]))
+        camera = self.config.get("camera", {})
+        transform = PixelTableTransform(
+            tuple(workspace["image_size"]), tuple(workspace["table_bounds_m"]),
+            homography=camera.get("homography"),
+            calibration_image_size=camera.get("image_size"),
+        )
         by_id = {sock.id: sock for sock in socks}
         pair_destinations = workspace["couples_origins_m"]
 
@@ -179,6 +184,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.device:
         config["perception"]["sam"]["device"] = args.device
         config["matching"]["clip"]["device"] = args.device
+    if args.synthetic:
+        # A real camera calibration does not describe the generated scene.
+        config.pop("camera", None)
     image, metadata = _load_image(args, config)
     actual_size = [image.shape[1], image.shape[0]]
     config["workspace"]["image_size"] = actual_size
