@@ -116,7 +116,7 @@ Real images use `camera.homography` when present in the selected config. Without
 
 To calibrate:
 
-1. Set `REAL_POINTS` in `calibrate.py` to four measured marker coordinates in meters in the robot's `arm_base` frame. Use distinct markers with no three collinear.
+1. Set `camera.table_points_m` in `config.json` (or your `--config` file) to four measured marker coordinates in meters in the robot's `arm_base` frame. Use distinct markers with no three collinear.
 2. Keep the camera fixed and run `python calibrate.py --camera 0` (or `--image table.jpg` / `--url STREAM_URL`). Click the corresponding markers in the same order.
 3. The script saves `camera.homography` and `camera.image_size` to the project `config.json`. Use `--config PATH` on both scripts if using another config.
 4. Check additional measured points: the fitting error at the original four markers does not measure independent accuracy. Recalibrate if the camera moves, the view is cropped, or zoom changes.

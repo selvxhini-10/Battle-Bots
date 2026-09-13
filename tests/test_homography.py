@@ -5,10 +5,11 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 
+import calibrate
 from calibrate import compute_homography, save_to_config
 from solemates.app import SolematesApp, main
 from solemates.planning import PixelTableTransform
@@ -20,6 +21,45 @@ BOUNDS = (-0.35, 0.35, -0.30, 0.30)
 
 
 class HomographyTest(unittest.TestCase):
+    def test_calibration_cli_uses_configured_markers(self):
+        pixels = [[100, 100], [800, 80], [850, 550], [70, 500]]
+        table = [[-.15, .18], [.22, .16], [.20, -.19], [-.17, -.21]]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps({"camera": {"table_points_m": table}, "other": 42}))
+            def collect_points(*args):
+                calibrate.clicked_points = pixels.copy()
+                return -1
+            with patch("sys.argv", ["calibrate.py", "--config", str(path),
+                                    "--output-image", str(Path(directory) / "calibration.png")]), \
+                    patch("calibrate.grab_frame", return_value=np.zeros((640, 960, 3), np.uint8)), \
+                    patch("calibrate.cv2.namedWindow"), patch("calibrate.cv2.resizeWindow"), \
+                    patch("calibrate.cv2.setMouseCallback") as callback, \
+                    patch("calibrate.cv2.imshow"), patch("calibrate.cv2.destroyAllWindows"), \
+                    patch("calibrate.cv2.waitKey", side_effect=collect_points), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                calibrate.main()
+            saved = json.loads(path.read_text())
+            self.assertEqual(callback.call_args.args[2], table)
+            self.assertEqual(saved["camera"]["table_points_m"], table)
+            self.assertEqual(saved["other"], 42)
+            transform = PixelTableTransform((960, 640), BOUNDS, saved["camera"]["homography"])
+            np.testing.assert_allclose([transform.point(p) for p in pixels], table, atol=1e-7)
+
+    def test_missing_or_invalid_markers_fail_before_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            for points in (None, [[0, 0]] * 4, [[0, 0], [1, 0], [2, 0], [0, 1]]):
+                path.write_text(json.dumps({"camera": {"table_points_m": points}}))
+                with self.subTest(points=points), \
+                        patch("sys.argv", ["calibrate.py", "--config", str(path)]), \
+                        patch("calibrate.grab_frame") as capture, \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as error:
+                        calibrate.main()
+                    self.assertEqual(error.exception.code, 2)
+                    capture.assert_not_called()
+
     def test_perspective_fit_maps_independent_point(self):
         expected = np.array([[0.001, 0.0002, -0.3], [0.0001, -0.001, 0.2],
                              [0.0004, 0.0002, 1.]])

@@ -12,6 +12,7 @@ class PipelineTest(unittest.TestCase):
         root = Path(__file__).parents[1]
         config = json.loads((root / "config.json").read_text())
         image, _ = make_scene(*config["workspace"]["image_size"])
+        config.pop("camera", None)  # Match the synthetic CLI calibration policy.
         app = SolematesApp(config)
         socks, pairs, singles, _ = app.analyze(image)
         app.execute(socks, pairs, singles)

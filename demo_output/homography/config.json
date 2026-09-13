@@ -10,7 +10,7 @@
     "minimum_area_px": 1800,
     "morphology_kernel": 5,
     "sam": {
-      "checkpoint": "models/sam_vit_b_01ec64.pth",
+      "checkpoint": "/Users/anusha/hack/Battle-Bots/models/sam_vit_b_01ec64.pth",
       "model_type": "vit_b",
       "device": "auto",
       "points_per_side": 24,
@@ -72,7 +72,25 @@
     "singles_origin_m": [
       -0.25,
       -0.22
-    ]
+    ],
+    "slot_spacing_m": 0.08,
+    "slot_columns": 2,
+    "placement_yaw_rad": 0.0,
+    "pair_arms": [
+      "right",
+      "left"
+    ],
+    "single_arm": "left",
+    "reunion_xy_m": {
+      "right": [
+        0.09,
+        -0.03
+      ],
+      "left": [
+        -0.09,
+        -0.03
+      ]
+    }
   },
   "execution": {
     "backend": "simulated",
@@ -80,32 +98,36 @@
     "max_retries": 2
   },
   "camera": {
-    "table_points_m": [
-      [-0.20, 0.20],
-      [0.20, 0.20],
-      [0.20, -0.20],
-      [-0.20, -0.20]
-    ],
     "homography": [
       [
-        -0.0008446539645758597,
-        -1.0995613809815036e-06,
-        0.6814898027647505
+        0.0008691487928152774,
+        8.821505650155833e-06,
+        -0.412840365105966
       ],
       [
-        -5.657225440426001e-06,
-        -0.0011836673633750438,
-        0.9665379957946807
+        -4.312079873757824e-05,
+        -0.001136462904832118,
+        0.37172267222873234
       ],
       [
-        -6.131222672256112e-05,
-        0.00044469186012631147,
+        3.9379465799426066e-05,
+        0.00014877237352011868,
         1.0
       ]
     ],
     "image_size": [
-      1920,
-      1080
-    ]
+      960,
+      640
+    ],
+    "frame": "arm_base"
+  },
+  "simulation": {
+    "urdf": "chopped_urdf_v2/chopped_urdf_v2/urdf/chopped_urdf_v2.urdf",
+    "base_frame": "arm_base",
+    "end_effectors": {
+      "left": "left_eef",
+      "right": "right_eef"
+    },
+    "ik_tolerance_m": 0.015
   }
 }
