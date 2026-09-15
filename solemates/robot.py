@@ -60,6 +60,11 @@ class SimulatedRobot(Robot):
         self._workspace = workspace
         self._transform = transform
         self._step      = 0        # mirrors app.step for viz timestamps
+        self._urdf_path = urdf     # kept for URDF viz init after viz.init()
+
+        # URDF animator — initialised lazily on first move (after viz.init() ready)
+        self._urdf_viz  = None
+        self._urdf_init_attempted = False
 
         # Current EE positions for trail + sock-carry logging
         self._ee_pos: dict[str, tuple[float, float, float]] = {
@@ -152,15 +157,37 @@ class SimulatedRobot(Robot):
     # Internal visualization helpers (all no-ops when self._viz is None)
     # ------------------------------------------------------------------
 
+    def _ensure_urdf_viz(self) -> None:
+        """Lazy-init the URDF animator on first move, after viz.init() is done."""
+        if self._urdf_viz is not None or self._urdf_init_attempted:
+            return
+        if self._viz is None or not self._viz._ready() or self._urdf_path is None:
+            return
+        self._urdf_init_attempted = True
+        try:
+            from . import urdf_viz as _uv
+            if _uv.init_urdf(self._urdf_path, self._viz):
+                self._urdf_viz = _uv
+                print("[SimulatedRobot] URDF mesh loaded into Rerun 3D world")
+            else:
+                print("[SimulatedRobot] URDF mesh not loaded (file not found or rerun not ready)")
+        except Exception as exc:
+            print(f"[SimulatedRobot] URDF viz skipped: {exc}")
+
     def _viz_ee_move(self, arm: str, pose: Pose, ik_error: Optional[float]) -> None:
         if self._viz is None:
             return
+        self._ensure_urdf_viz()
         self._viz.log_ee_move(arm, pose, self._step, ik_error)
 
     def _viz_joint_state(self, arm: str, joints: dict[str, float]) -> None:
         if self._viz is None:
             return
         self._viz.log_joint_state(arm, joints, self._step)
+        # Animate the full URDF mesh using all currently known joint positions
+        if self._urdf_viz is not None:
+            all_joints = {**self.joints["left"], **self.joints["right"]}
+            self._urdf_viz.log_robot_state(all_joints, self._step, self._viz)
 
     def _viz_sock_carried(self, sock_id: int, arm: str) -> None:
         if self._viz is None:
