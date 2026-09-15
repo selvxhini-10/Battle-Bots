@@ -77,16 +77,27 @@ def _sock_color(sock_id: int) -> tuple:
 # Module-level recorder handle (set by init())
 # ---------------------------------------------------------------------------
 _rr = None
+_initialized = False   # True only after init() completes successfully
+
+
+_dt = None   # rerun.datatypes, cached to avoid repeated lazy-import warnings
 
 
 def _try_import() -> bool:
-    global _rr
+    global _rr, _dt
     try:
         import rerun as rr
+        import rerun.datatypes as dt  # import explicitly — avoids rr.__getattr__ spam
         _rr = rr
+        _dt = dt
         return True
     except ImportError:
         return False
+
+
+def _ready() -> bool:
+    """Return True only when rerun is imported AND init() has been called."""
+    return _rr is not None and _initialized
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +136,7 @@ def init(recording_id: str = "solemates") -> bool:
                     origin="joints",
                     contents=["joints/**"],
                 ),
-                column_shares=[3, 1],
+                row_shares=[3, 1],        # Vertical splits vertically → row_shares
             ),
             Vertical(
                 Spatial3DView(
@@ -137,13 +148,17 @@ def init(recording_id: str = "solemates") -> bool:
                     name="State log",
                     origin="state",
                 ),
-                column_shares=[3, 1],
+                row_shares=[3, 1],
             ),
+            column_shares=[1, 1],         # Horizontal splits horizontally → column_shares
         )
     )
 
     rr.init(recording_id, spawn=False)
     rr.send_blueprint(blueprint)
+
+    global _initialized
+    _initialized = True
 
     # Declare joint time-series appearance (static, once)
     _init_joint_series()
@@ -152,7 +167,7 @@ def init(recording_id: str = "solemates") -> bool:
 
 def save(path: Path) -> bool:
     """Save the completed recording to *path* (.rrd)."""
-    if _rr is None:
+    if not _ready():
         return False
     _rr.save(str(path))
     return True
@@ -165,10 +180,10 @@ def log_camera_frame(
     step: int,
 ) -> None:
     """Log raw + annotated 2D camera frames and segmentation masks."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     rr.log("camera/raw",      rr.Image(image,      color_model="BGR"))
     rr.log("camera/annotated", rr.Image(annotated, color_model="BGR"))
@@ -194,10 +209,10 @@ def log_pairs(
     step: int,
 ) -> None:
     """Log pair scores as a text summary on the camera panel."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     lines = []
     for p in pairs:
@@ -223,7 +238,7 @@ def log_3d_scene(workspace: dict) -> None:
       - arm-base origin marker
     Call once before the motion loop.
     """
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
 
@@ -294,10 +309,10 @@ def log_sock_3d(
     Log a sock as an oriented 3D box on the table surface.
     *held_by* is "left"/"right" when an arm is holding it.
     """
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     x, y = transform.point(sock.grasp_px)
     z = table_z + 0.005  # 5 mm above table
@@ -319,9 +334,9 @@ def log_sock_3d(
             centers=[[x, y, z]],
             half_sizes=[[hw, hd, 0.003]],
             rotation_axis_angles=[
-                rr.datatypes.RotationAxisAngle(
+                _dt.RotationAxisAngle(
                     axis=[0, 0, 1],
-                    angle=rr.datatypes.Angle(rad=float(sock.angle_rad)),
+                    angle=_dt.Angle(rad=float(sock.angle_rad)),
                 )
             ],
             colors=[tuple(color)],
@@ -337,10 +352,10 @@ def log_sock_carried(
     step: int,
 ) -> None:
     """Move a sock's 3D box to follow the end-effector while carried."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
     x, y, z = ee_pos
     color = list(_sock_color(sock_id))
     color[3] = 255
@@ -365,10 +380,10 @@ def log_ee_move(
     Log end-effector position + orientation arrow, and accumulate
     a trajectory trail for this arm.
     """
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     color = _ARM_COLORS.get(arm, _GRAY)
     pos   = [pose.x, pose.y, pose.z]
@@ -395,10 +410,10 @@ def log_ee_move(
 
 def log_gripper(arm: str, closed: bool, step: int) -> None:
     """Log gripper state as a small coloured marker."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
     color = _RED if closed else _GREEN
     rr.log(
         f"world/arms/{arm}/gripper_state",
@@ -417,10 +432,10 @@ def log_joint_state(
     step: int,
 ) -> None:
     """Log each joint angle as a scalar so the timeline panel shows curves."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     for name, angle in joints.items():
         rr.log(f"joints/{arm}/{name}", rr.Scalars(angle))
@@ -433,10 +448,10 @@ def log_state_transition(
     data: Optional[dict] = None,
 ) -> None:
     """Log a state-machine transition to the text log panel."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
-    rr.set_time_sequence("step", step)
+    rr.set_time("step", sequence=step)
 
     detail = ""
     if data:
@@ -526,7 +541,7 @@ _trails: dict[str, list[list[float]]] = {}
 
 def _append_trail(arm: str, pos: list[float], step: int) -> None:
     """Accumulate EE positions and re-log the growing polyline."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
     trail = _trails.setdefault(arm, [])
@@ -542,7 +557,7 @@ def _append_trail(arm: str, pos: list[float], step: int) -> None:
 
 def _init_joint_series() -> None:
     """Declare joint time-series appearance (static, logged once)."""
-    if _rr is None:
+    if not _ready():
         return
     rr = _rr
     joint_names_left  = [f"lj{i}" for i in range(7)]

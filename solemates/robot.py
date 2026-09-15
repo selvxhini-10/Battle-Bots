@@ -176,10 +176,11 @@ class SimulatedRobot(Robot):
         if self._viz is None:
             return
         import math
-        rr = getattr(self._viz, "_rr", None)
-        if rr is None:
+        if not self._viz._ready():
             return
-        rr.set_time_sequence("step", self._step)
+        rr = self._viz._rr
+        dt = self._viz._dt
+        rr.set_time("step", sequence=self._step)
         from .visualization import _sock_color
         color = list(_sock_color(sock_id))
         color[3] = 200
@@ -189,9 +190,9 @@ class SimulatedRobot(Robot):
                 centers=[[x, y, z]],
                 half_sizes=[[0.06, 0.035, 0.003]],
                 rotation_axis_angles=[
-                    rr.datatypes.RotationAxisAngle(
+                    dt.RotationAxisAngle(
                         axis=[0, 0, 1],
-                        angle=rr.datatypes.Angle(rad=angle),
+                        angle=dt.Angle(rad=angle),
                     )
                 ],
                 colors=[tuple(color)],
